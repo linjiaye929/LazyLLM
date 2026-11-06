@@ -247,7 +247,18 @@ class ReactAgent(LazyLLMAgentBase):
                 agent_ctx = locals['_lazyllm_agent']
             except (KeyError, TypeError):
                 agent_ctx = {}
-            history = agent_ctx.get('workspace', {}).get('history', []) if isinstance(agent_ctx, dict) else []
+            workspace = agent_ctx.get('workspace', {}) if isinstance(agent_ctx, dict) else {}
+            history = list(workspace.get('history', []))
+            if (self._fc is not None and isinstance(ret, dict) and ret.get('tool_calls')
+                    and workspace.get('tool_call_trace')):
+                # The final tool results enter history only when another round starts.
+                history.append({
+                    'role': 'assistant',
+                    'content': ret.get('content', ''),
+                    'tool_calls': ret['tool_calls'],
+                    'reasoning_content': ret.get('reasoning_content', ''),
+                })
+                history.extend(self._fc._build_current_tool_messages(workspace, None))
             if history:
                 LOG.warning(f'ReactAgent reached max_retries={self._max_retries}, attempting force summarize.')
                 summary = None
@@ -258,7 +269,6 @@ class ReactAgent(LazyLLMAgentBase):
                 if summary is not None:
                     if self._stream:
                         _write_agent_data('text', delta=summary)
-                    workspace = agent_ctx.get('workspace', {}) if isinstance(agent_ctx, dict) else {}
                     LOG.info(
                         f'[ReactAgent] [FORCE_SUMMARY_COMPLETED] sid={lazyllm_globals._sid} workspace_retained=True '
                         f'history_messages={len(workspace.get("history") or [])}'
